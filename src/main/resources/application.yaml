@@ -22,6 +22,9 @@ spring:
   rabbitmq:
     host: 120.26.122.127
     port: 5672
+    listener:
+      simple:
+        acknowledge-mode: manual
 mybatis-plus:
   type-aliases-package: com.hmdp.entity # 别名扫描包
 logging:

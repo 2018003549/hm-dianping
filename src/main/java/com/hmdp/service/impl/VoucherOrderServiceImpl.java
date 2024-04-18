@@ -12,6 +12,7 @@ import com.hmdp.utils.UserHolder;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.aop.framework.AopContext;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -54,31 +55,45 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         SECKILL_SCRIPT.setLocation(new ClassPathResource("seckill.lua"));
         SECKILL_SCRIPT.setResultType(Long.class);
     }
-    private BlockingQueue<VoucherOrder> orderTasks=new ArrayBlockingQueue<>(1024*1024);
-    private static final ExecutorService SECKILL_ORDER_EXECTOR= Executors.newSingleThreadExecutor();
-    @PostConstruct
-    private void init(){
-        SECKILL_ORDER_EXECTOR.submit(new VoucerOrderHandle());
-    }
-    private class VoucerOrderHandle implements  Runnable{
-        @Override
-        public void run() {
-            while (true){
-                //1.获取队列中的订单信息
-                try {
-                    log.info("获取订单信息");
-                    VoucherOrder voucherOrder = orderTasks.take();
-                    //2.创建订单
-                    handleVoucherOrder(voucherOrder);
-                } catch (InterruptedException e) {
-                    log.error("处理订单异常:{}",e);
-                }
-            }
-        }
+//    private BlockingQueue<VoucherOrder> orderTasks=new ArrayBlockingQueue<>(1024*1024);
+//    private static final ExecutorService SECKILL_ORDER_EXECTOR= Executors.newSingleThreadExecutor();
+//    @PostConstruct
+//    private void init(){
+//        SECKILL_ORDER_EXECTOR.submit(new VoucerOrderHandle());
+//    }
+//    private class VoucerOrderHandle implements  Runnable{
+//        @Override
+//        public void run() {
+//            while (true){
+//                //1.获取队列中的订单信息
+//                try {
+//                    log.info("获取订单信息");
+//                    VoucherOrder voucherOrder = orderTasks.take();
+//                    //2.创建订单
+//                    handleVoucherOrder(voucherOrder);
+//                } catch (InterruptedException e) {
+//                    log.error("处理订单异常:{}",e);
+//                }
+//            }
+//        }
+//        @Transactional
+//        private void handleVoucherOrder(VoucherOrder voucherOrder) {
+//            //1.多线程下，用户id只能从订单中获取
+//            Long userId = voucherOrder.getUserId();
+//            Long voucherId = voucherOrder.getVoucherId();
+//            //2.扣减库存
+//            boolean success = seckillVoucherService.update().setSql("stock=stock-1")
+//                    .eq("voucher_id", voucherId)
+//                    //======判断当前库存是否大于0就可以决定是否能抢池子中的券了
+//                    .gt("stock", 0)
+//                    .update();
+//            //3.创建订单
+//            save(voucherOrder);
+//        }
+//    }
         @Transactional
-        private void handleVoucherOrder(VoucherOrder voucherOrder) {
-            //1.多线程下，用户id只能从订单中获取
-            Long userId = voucherOrder.getUserId();
+        public void handleVoucherOrder(VoucherOrder voucherOrder) {
+            //1.所有信息从当前消息实体中拿
             Long voucherId = voucherOrder.getVoucherId();
             //2.扣减库存
             boolean success = seckillVoucherService.update().setSql("stock=stock-1")
@@ -89,7 +104,8 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
             //3.创建订单
             save(voucherOrder);
         }
-    }
+    @Resource
+    RabbitTemplate rabbitTemplate;
     @Override
     public Result seckillVoucher(Long voucherId) {
         //1.执行lua脚本，判断当前用户的购买资格
@@ -108,8 +124,8 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         voucherOrder.setId(orderId);
         voucherOrder.setUserId(UserHolder.getUser().getId());
         voucherOrder.setVoucherId(voucherId);
-        //放入阻塞队列等待异步消费
-        orderTasks.add(voucherOrder);
+        //存入消息队列等待异步消费
+        rabbitTemplate.convertAndSend("seckill.direct","seckill.order",voucherOrder);
         return Result.ok(orderId);
     }
 
