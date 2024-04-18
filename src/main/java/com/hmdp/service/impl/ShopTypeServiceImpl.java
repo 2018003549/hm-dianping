@@ -44,7 +44,7 @@ public class ShopTypeServiceImpl extends ServiceImpl<ShopTypeMapper, ShopType> i
             return Result.fail("没有定义商铺类别信息！！！");
         }
         //6.存在就写回到redis
-        stringRedisTemplate.opsForList().leftPushAll("typeList",typeList.stream().map(
+        stringRedisTemplate.opsForList().rightPushAll("typeList",typeList.stream().map(
                 shopType -> {
                     return JSONUtil.toJsonStr(shopType);
                 }
